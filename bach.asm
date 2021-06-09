@@ -24,7 +24,7 @@ DATASEG
     InputCode dw 0h
     IsAlbumLoaded db 0
     currentAlbum db 0
-    currentRow db 0
+    CurrentRow db 0
 
 ; Mouse Mask
 	MouseMask       dw    0011111111111111b
@@ -303,106 +303,89 @@ endp WriteComms
 ; Return: see flowchart II.
 proc MouseHandler far
     ; documentation: http://www.techhelpmanual.com/845-int_33h_000ch__set_mouse_event_handler.html
-		; show mouse
-		push ax
-		mov ax,01h
-		int 33h
-		pop ax
-
-
 		shr cx, 1 	 ;the Mouse default is 640X200 So divide 640 by 2 to get
     ; dx = row [x], cx = column [y]
 
+    ; hide mouse
     push ax
 		mov ax,02h
 		int 33h
 		pop ax
 
+    ; detect if user clicked header
     cmp dx, 23
-    jae @@notheader
+    ja @@NotHeader
+    jmp @@Header
 
-    jmp @@header
-
-@@notheader:
-
+@@NotHeader:
+    ; if not check if this is album grid or song list
     cmp [IsAlbumLoaded], 1
     je @@InAlbumLogic
 
-    ; per album frame
-
+    ; calculate clicked album
     cmp dx, 110
     jb @@FirstRow
 
     add [currentAlbum], 4
 
 @@FirstRow:
-
     ; calc in-row pos
-
     mov di, cx
     sub di, 7
 
-@@calcpos:
+@@CalcPos:
     inc [currentAlbum]
     sub di, 77
     cmp di, 0
-    jg @@calcpos
+    jg @@CalcPos
 
+    ; no ninth album - workaround
     cmp [currentAlbum], 9
     jl @@correct
 
     dec [currentAlbum]
 
 @@correct:
+    ; prepare relevant screen
     push dx
     mov dl, [currentAlbum]
     add dl, 30h
     mov [AlbumFile + 7], dl
     pop dx
 
+    ; load screen
     mov dx, offset AlbumFile
     call LoadScreen
     mov [IsAlbumLoaded], 1
 
-    ; ; shl cx, 1
-    ; mov ah, 0dh
-    ; int 10h
-    ; ; shr cx, 1
-
-    ; cmp al, 24
-    ; je @@notblank
-    ;
-    ; cmp al, 25
-    ; je @@notblank
-
-@@JMPEXITREF:
-
     jmp ExitProc
 
 @@InAlbumLogic:
-
+    ; if in song list, calculate clicked song
     mov di, dx
     sub di, 27
-    mov [currentRow], 0
+    mov [CurrentRow], 0
 
-@@calcrow:
-    inc [currentRow]
+@@CalcRow:
+    inc [CurrentRow]
     sub di, 14
     cmp di, 0
-    jg @@calcrow
+    jg @@CalcRow
 
-    cmp [currentRow], 13
-    jne @@dontdec
+    ; no 13th song - workaround
+    cmp [CurrentRow], 13
+    jne @@correct2
 
-    dec [currentRow]
+    dec [CurrentRow]
 
-@@dontdec:
+@@correct2:
     push ax
 
+    ; write matching input code
     xor ah, ah
     mov al, [currentAlbum]
     shl ax, 4
-    add al, [currentRow]
+    add al, [CurrentRow]
     mov [InputCode], ax
     call WriteComms
 
@@ -410,14 +393,7 @@ proc MouseHandler far
     jmp ExitProc
 
 @@header:
-    ; ; shl cx, 1
-    ; mov ah, 0dh
-    ; int 10h
-    ; ; shr cx, 1
-
-    ; cmp al, 0
-    ; je ExitProc
-
+    ; check which header button user clicked
     cmp cx, 30
     jb @@back
 
@@ -432,6 +408,7 @@ proc MouseHandler far
 
     jmp @@forward
 
+    ; then write matching input code
 @@back:
     mov [InputCode], 0h
     jmp @@save
@@ -445,14 +422,16 @@ proc MouseHandler far
     jmp @@save
 
 @@stopandexit:
-
+    ; if not in album, exit
     cmp [IsAlbumLoaded], 1
     jne ExitProc
 
+    ; reset variables when returning to album grid
     mov [InputCode], 3h
     mov [IsAlbumLoaded], 0
     mov [currentAlbum], 0
 
+    ; load album grid
     mov dx, offset FileName
     call LoadScreen
 
@@ -494,6 +473,11 @@ endp 	SetText
 ; Entry: none.
 ; Return: set mouse handler procedure using interrupt 33h / function 0Ch.
 proc setAsyncMouse
+    ; show mouse
+    mov ax,01h
+    int 33h
+
+    ; set async handler
     mov ax, seg MouseHandler
     mov es, ax
     mov dx, offset MouseHandler ; ES:DX -> Far Routine
